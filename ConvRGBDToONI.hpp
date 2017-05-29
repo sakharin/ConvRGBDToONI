@@ -14,8 +14,47 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+// OpenNI
+#include <XnCppWrapper.h>
+#include <XnLog.h>
+
 using namespace cv;
 using namespace std;
+using namespace xn;
 
-void getFiles(string dir, vector< string >& files);
+#define CHECK_RC(rc, what) \
+  if (rc != XN_STATUS_OK) \
+  { \
+    printf("%s failed: %s\n", what, xnGetStatusString(rc)); \
+    return rc; \
+  }
+
+class ConvRGBDToONI {
+ private:
+  Context context_;
+  XnStatus ret_val_;
+
+  DepthGenerator depth_generator_;
+  ImageGenerator image_generator_;
+
+  DepthMetaData depth_meta_data_;
+  ImageMetaData image_meta_data_;
+
+  MockDepthGenerator mock_depth_generator_;
+  MockImageGenerator mock_image_generator_;
+
+  Recorder* recorder_;
+
+ public:
+  ConvRGBDToONI();
+  ~ConvRGBDToONI();
+  int initXML(string xml_file);
+  //int openInputFile(string input_oni);
+  int initGenerators();
+  int readFrame(Mat& image, Mat& depth);
+  int openOutputFile(string output_oni);
+  int writeFrame(Mat image, Mat depth);
+  int record();
+  int stopRecord();
+};
 #endif
