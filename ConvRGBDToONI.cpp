@@ -252,7 +252,6 @@ int main( int argc, const char** argv ) {
 
   // Check parameters
   if (argc < 4 || argc > 5) {
-    cout << "Usage: " << argv[0] << " XML_file image_foler dummy_input.oni output.oni [number_of_frames]" << endl;
     cout << "Usage: " << endl;
     cout << "       " << argv[0] << " image_foler XML_file output.oni [number_of_frames]" << endl;
     cout << "       " << argv[0] << " image_foler dummy_input.oni output.oni [number_of_frames]" << endl;
