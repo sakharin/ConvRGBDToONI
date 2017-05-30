@@ -44,16 +44,18 @@ class ConvRGBDToONI {
   MockImageGenerator mock_image_generator_;
 
   Recorder* recorder_;
+  Player player_;
 
  public:
   ConvRGBDToONI();
   ~ConvRGBDToONI();
+  int init();
   int initXML(string xml_file);
-  //int openInputFile(string input_oni);
+  int openInputFile(string input_oni);
   int initGenerators();
   int readFrame(Mat& image, Mat& depth);
   int openOutputFile(string output_oni);
-  int writeFrame(Mat image, Mat depth);
+  int writeFrame(Mat image, Mat depth, int frame_no);
   int record();
   int stopRecord();
 };

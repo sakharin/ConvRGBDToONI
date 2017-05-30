@@ -20,17 +20,32 @@ void getFiles(string dir, vector< string >& files) {
   closedir(dp);
 }
 
+// https://stackoverflow.com/questions/20446201/how-to-check-if-string-ends-with-txt
+bool hasSuffix(const string &str, const string &suffix)
+{
+  return str.size() >= suffix.size() &&
+      str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 ConvRGBDToONI::ConvRGBDToONI() {
   ret_val_ = XN_STATUS_OK;
 }
 
 ConvRGBDToONI::~ConvRGBDToONI() {
-  context_.Shutdown();
-
   depth_generator_.Release();
   image_generator_.Release();
 
+  mock_image_generator_.Release();
   mock_depth_generator_.Release();
+
+  player_.Release();
+  context_.Release();
+}
+
+int ConvRGBDToONI::init() {
+  ret_val_ = context_.Init();
+  CHECK_RC(ret_val_, "Init");
+  return 1;
 }
 
 int ConvRGBDToONI::initXML(string xml_file) {
@@ -40,26 +55,23 @@ int ConvRGBDToONI::initXML(string xml_file) {
   return 1;
 }
 
-/*
-XnChar ConvRGBDToONI::openInputFile(string input_oni) {
+int ConvRGBDToONI::openInputFile(string input_oni) {
   // Open input file
-  Player player;
-  ret_val_ = context_.OpenFileRecording(input_oni.c_str(), player);
+  ret_val_ = context_.OpenFileRecording(input_oni.c_str(), player_);
   CHECK_RC(ret_val_, "Open input file");
   // Play as fast as you can
-  ret_val_ = player.SetPlaybackSpeed(XN_PLAYBACK_SPEED_FASTEST);
+  ret_val_ = player_.SetPlaybackSpeed(XN_PLAYBACK_SPEED_FASTEST);
   CHECK_RC(ret_val_, "Setting playback speed");
   // Set loop
-  ret_val_ = player.SetRepeat(FALSE);
+  ret_val_ = player_.SetRepeat(TRUE);
   CHECK_RC(ret_val_, "Set loop");
 }
-*/
 
 int ConvRGBDToONI::initGenerators() {
-  NodeInfoList list;
-  ret_val_ = context_.EnumerateExistingNodes(list);
+  NodeInfoList node_info_list;
+  ret_val_ = context_.EnumerateExistingNodes(node_info_list);
   CHECK_RC(ret_val_, "Enumerate nodes");
-  for (NodeInfoList::Iterator it = list.Begin(); it != list.End(); ++it) {
+  for (NodeInfoList::Iterator it = node_info_list.Begin(); it != node_info_list.End(); ++it) {
     switch ((*it).GetDescription().Type) {
     case XN_NODE_TYPE_IMAGE:
       (*it).GetInstance(image_generator_);
@@ -79,6 +91,7 @@ int ConvRGBDToONI::initGenerators() {
   if (depth_generator_.IsCapabilitySupported(XN_CAPABILITY_USER_POSITION))
     cout << "depth capability user" << endl;
 
+  // Flush few frames
   Mat image;
   Mat depth;
   readFrame(image, depth);
@@ -106,13 +119,11 @@ int ConvRGBDToONI::readFrame(Mat& image, Mat& depth) {
 
   XnRGB24Pixel* pImageData = const_cast <XnRGB24Pixel*> (pImage);
   cvSetData(imageAux, pImageData, 640*3);
-  //cvCvtColor(imageAux, iplImgFrame, CV_RGB2BGR);
   Mat tmp_image = cv::cvarrToMat(imageAux);
   cvtColor(tmp_image, image, CV_RGB2BGR);
 
-  //cvShowImage("RGB Dentro", iplImgFrame);
-  //cvShowImage("RGB Dentro Aux", imageAux);
-  //waitKey(0);
+  //cvShowImage("RGB", image);
+  //waitKey(1);
 
   // Take current depth map
   XnDepthPixel* pDepthMap = const_cast <XnDepthPixel*> ( depth_generator_.GetDepthMap());
@@ -123,8 +134,8 @@ int ConvRGBDToONI::readFrame(Mat& image, Mat& depth) {
   cvSetData(iplDepthFrame, pDepthData, 640*2);
   depth = cv::cvarrToMat(iplDepthFrame);
 
-  //cvShowImage("Depth Dentro Aux", iplDepthFrame);
-  //waitKey(0);
+  //cvShowImage("Depth", depth);
+  //waitKey(1);
 
   cvReleaseImageHeader(&imageAux);
   cvReleaseImage(&iplImgFrame);
@@ -163,7 +174,7 @@ int ConvRGBDToONI::openOutputFile(string output_oni) {
   }
 }
 
-int ConvRGBDToONI::writeFrame(Mat image, Mat depth) {
+int ConvRGBDToONI::writeFrame(Mat image, Mat depth, int frame_no) {
   EnumerationErrors errors;
   ret_val_ = context_.WaitAnyUpdateAll();
   CHECK_RC(ret_val_, "Wait for update");
@@ -180,6 +191,9 @@ int ConvRGBDToONI::writeFrame(Mat image, Mat depth) {
   if (mock_depth_generator_.IsValid()) {
     //cout << "Depth valid" << endl;
   }
+
+  XnUInt32 frame_id = (XnUInt32)frame_no;
+  XnUInt64 timestamp = 400 * frame_no; // 25 frame/second (400 ms/frame)
 
   // Process image data
   ret_val_ = image_meta_data_.MakeDataWritable();
@@ -199,7 +213,7 @@ int ConvRGBDToONI::writeFrame(Mat image, Mat depth) {
       image_map(u, v) = image_pixel;
     }
   }
-  ret_val_ = mock_image_generator_.SetData(image_meta_data_);
+  ret_val_ = mock_image_generator_.SetData(image_meta_data_, frame_id, timestamp);
   CHECK_RC(ret_val_, "Set image data");
 
   // Process depth data
@@ -213,7 +227,7 @@ int ConvRGBDToONI::writeFrame(Mat image, Mat depth) {
       depth_map(u, v) = depth.at<unsigned short>(v, u);
     }
   }
-  ret_val_ = mock_depth_generator_.SetData(depth_meta_data_);
+  ret_val_ = mock_depth_generator_.SetData(depth_meta_data_, frame_id, timestamp);
   CHECK_RC(ret_val_, "Set depth data");
 }
 
@@ -228,22 +242,42 @@ int ConvRGBDToONI::stopRecord() {
 }
 
 int main( int argc, const char** argv ) {
-  // Check parameters
+  // Parameters
+  bool is_use_Kinect;
   string xml_file;
   string dir;
   string dummy_input_oni;
   string output_oni;
   int number_of_frames;
-  if (argc < 5 || argc > 6) {
+
+  // Check parameters
+  if (argc < 4 || argc > 5) {
     cout << "Usage: " << argv[0] << " XML_file image_foler dummy_input.oni output.oni [number_of_frames]" << endl;
+    cout << "Usage: " << endl;
+    cout << "       " << argv[0] << " image_foler XML_file output.oni [number_of_frames]" << endl;
+    cout << "       " << argv[0] << " image_foler dummy_input.oni output.oni [number_of_frames]" << endl;
     return -1;
   } else {
-    xml_file = argv[1];
-    dir = argv[2];
-    dummy_input_oni = argv[3];
-    output_oni = argv[4];
-    if (argc == 6) {
-      number_of_frames = atoi(argv[5]);
+    // Check second argument
+    if (hasSuffix(argv[2], ".xml") || hasSuffix(argv[2], ".XML")) {
+      // Store parameters using Kinect
+      dir = argv[1];
+      xml_file = argv[2];
+      output_oni = argv[3];
+      is_use_Kinect = true;
+    } else if (hasSuffix(argv[2], ".oni") || hasSuffix(argv[2], ".ONI")) {
+      // Store parameters without using Kinect
+      dir = argv[1];
+      dummy_input_oni = argv[2];
+      output_oni = argv[3];
+      is_use_Kinect = false;
+    } else {
+      cerr << "Check argument 2." << endl;
+      return -1;
+    }
+    // Number of frame
+    if (argc == 5) {
+      number_of_frames = atoi(argv[4]);
     } else {
       number_of_frames = 1;
     }
@@ -261,15 +295,20 @@ int main( int argc, const char** argv ) {
 
   // Init ONI
   ConvRGBDToONI conv;
-  conv.initXML(xml_file);
-  //conv.openInputFile(dummy_input_oni);
+  if (is_use_Kinect) {
+    conv.initXML(xml_file);
+  } else {
+  conv.init();
+  conv.openInputFile(dummy_input_oni);
+  }
   conv.initGenerators();
+  conv.openOutputFile(output_oni);
 
   Mat image;
   Mat depth;
   conv.readFrame(image, depth);
 
-  conv.openOutputFile(output_oni);
+  // Record frames
   int frames = 0;
   while (frames < number_of_frames) {
     cout << "Frame : " << frames << "/" << number_of_frames << "\r" << flush;
@@ -281,7 +320,7 @@ int main( int argc, const char** argv ) {
     imshow("Image", image);
     imshow("Depth", depth);
 
-    conv.writeFrame(image, depth);
+    conv.writeFrame(image, depth, frames);
     conv.record();
 
     int key = waitKey(1) & 255;
