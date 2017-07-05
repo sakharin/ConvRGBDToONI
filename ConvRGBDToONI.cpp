@@ -105,7 +105,7 @@ int ConvRGBDToONI::readFrame(Mat& image, Mat& depth) {
   CHECK_RC(ret_val_, "Wait for update");
 
   if (image_generator_.IsValid()) {
-   image_generator_.GetMetaData(image_meta_data_);
+    image_generator_.GetMetaData(image_meta_data_);
   }
   if (depth_generator_.IsValid()) {
     depth_generator_.GetMetaData(depth_meta_data_);
@@ -297,8 +297,8 @@ int main( int argc, const char** argv ) {
   if (is_use_Kinect) {
     conv.initXML(xml_file);
   } else {
-  conv.init();
-  conv.openInputFile(dummy_input_oni);
+    conv.init();
+    conv.openInputFile(dummy_input_oni);
   }
   conv.initGenerators();
   conv.openOutputFile(output_oni);
