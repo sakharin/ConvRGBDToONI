@@ -278,7 +278,7 @@ int main( int argc, const char** argv ) {
     if (argc == 5) {
       number_of_frames = atoi(argv[4]);
     } else {
-      number_of_frames = 1;
+      number_of_frames = 1000;
     }
   }
 
